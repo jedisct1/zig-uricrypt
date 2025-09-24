@@ -94,15 +94,26 @@ const UriComponentIterator = struct {
             return null;
         }
 
-        // Find next component ending with '/'
-        if (std.mem.indexOfScalarPos(u8, self.rest, self.position, '/')) |slash_pos| {
-            const end = slash_pos + 1;
+        // Find next component ending with '/', '?', or '#'
+        const remaining = self.rest[self.position..];
+        var end_pos: ?usize = null;
+
+        // Find the nearest terminator ('/', '?', or '#')
+        for (remaining, 0..) |ch, i| {
+            if (ch == '/' or ch == '?' or ch == '#') {
+                end_pos = i;
+                break;
+            }
+        }
+
+        if (end_pos) |pos| {
+            const end = self.position + pos + 1; // Include the terminator
             const component = self.rest[self.position..end];
             self.position = end;
             return component;
         }
 
-        // Last component (no trailing slash)
+        // Last component (no trailing terminator)
         if (self.position < self.rest.len) {
             const component = self.rest[self.position..];
             self.done = true;
@@ -314,7 +325,8 @@ pub fn decryptUri(
 
             try result.append(allocator, decrypted_byte);
 
-            if (decrypted_byte == '/') {
+            // Check if this byte is a terminator ('/', '?', or '#')
+            if (decrypted_byte == '/' or decrypted_byte == '?' or decrypted_byte == '#') {
                 const bytes_read = pos - component_start;
                 const total_len = siv_size + bytes_read;
                 const padding_needed = (3 - (total_len % 3)) % 3;
@@ -411,6 +423,76 @@ test "split_uri_single_slash" {
     try std.testing.expect(iter.next() == null);
 }
 
+test "split_uri_with_query_params" {
+    const uri = "https://example.com/path?foo=bar&baz=qux";
+    const result = splitUri(uri);
+
+    try std.testing.expectEqualStrings("https://", result.scheme.?);
+
+    var iter = result.iterator();
+    try std.testing.expectEqualStrings("example.com/", iter.next().?);
+    try std.testing.expectEqualStrings("path?", iter.next().?);
+    try std.testing.expectEqualStrings("foo=bar&baz=qux", iter.next().?);
+    try std.testing.expect(iter.next() == null);
+}
+
+test "split_uri_with_fragment" {
+    const uri = "https://example.com/path#section";
+    const result = splitUri(uri);
+
+    try std.testing.expectEqualStrings("https://", result.scheme.?);
+
+    var iter = result.iterator();
+    try std.testing.expectEqualStrings("example.com/", iter.next().?);
+    try std.testing.expectEqualStrings("path#", iter.next().?);
+    try std.testing.expectEqualStrings("section", iter.next().?);
+    try std.testing.expect(iter.next() == null);
+}
+
+test "split_uri_with_query_and_fragment" {
+    const uri = "https://example.com/path?query=value#section";
+    const result = splitUri(uri);
+
+    try std.testing.expectEqualStrings("https://", result.scheme.?);
+
+    var iter = result.iterator();
+    try std.testing.expectEqualStrings("example.com/", iter.next().?);
+    try std.testing.expectEqualStrings("path?", iter.next().?);
+    try std.testing.expectEqualStrings("query=value#", iter.next().?);
+    try std.testing.expectEqualStrings("section", iter.next().?);
+    try std.testing.expect(iter.next() == null);
+}
+
+test "split_path_with_query_params" {
+    const uri = "/path/to/file?param=value";
+    const result = splitUri(uri);
+
+    try std.testing.expect(result.scheme == null);
+
+    var iter = result.iterator();
+    try std.testing.expectEqualStrings("/", iter.next().?);
+    try std.testing.expectEqualStrings("path/", iter.next().?);
+    try std.testing.expectEqualStrings("to/", iter.next().?);
+    try std.testing.expectEqualStrings("file?", iter.next().?);
+    try std.testing.expectEqualStrings("param=value", iter.next().?);
+    try std.testing.expect(iter.next() == null);
+}
+
+test "split_path_with_fragment" {
+    const uri = "/path/to/file#anchor";
+    const result = splitUri(uri);
+
+    try std.testing.expect(result.scheme == null);
+
+    var iter = result.iterator();
+    try std.testing.expectEqualStrings("/", iter.next().?);
+    try std.testing.expectEqualStrings("path/", iter.next().?);
+    try std.testing.expectEqualStrings("to/", iter.next().?);
+    try std.testing.expectEqualStrings("file#", iter.next().?);
+    try std.testing.expectEqualStrings("anchor", iter.next().?);
+    try std.testing.expect(iter.next() == null);
+}
+
 test "xor_in_place" {
     var data = [_]u8{ 0xFF, 0x00, 0xAA, 0x55 };
     const keystream = [_]u8{ 0x00, 0xFF, 0x55, 0xAA };
@@ -480,6 +562,19 @@ test "round_trip_various_uris" {
         "https://example.com/path/",
         "https://example.com/a/b/c/d/e",
         "https://subdomain.example.com/path/to/resource",
+        // URIs with query parameters
+        "https://example.com?query=value",
+        "https://example.com/path?foo=bar",
+        "https://example.com/path?foo=bar&baz=qux",
+        "https://example.com/path/file?param1=value1&param2=value2",
+        // URIs with fragments
+        "https://example.com#section",
+        "https://example.com/path#heading",
+        "https://example.com/path/file#anchor",
+        // URIs with both query and fragment
+        "https://example.com?query=value#section",
+        "https://example.com/path?foo=bar#heading",
+        "https://example.com/path/file?param1=value1&param2=value2#anchor",
     };
 
     const secret_key = "my_secret_key";
