@@ -16,50 +16,14 @@ const UriComponents = struct {
                 .rest = "",
                 .position = 0,
                 .done = true,
-                .is_absolute_path = false,
-                .initial_slash_handled = false,
             };
         }
 
-        // For path-only URIs
-        if (self.scheme == null) {
-            // Handle absolute paths that start with '/'
-            if (self.rest.len > 0 and self.rest[0] == '/') {
-                if (self.rest.len == 1) {
-                    // Just a single "/"
-                    return UriComponentIterator{
-                        .rest = "./",
-                        .position = 0,
-                        .done = false,
-                        .is_absolute_path = false, // Special case
-                        .initial_slash_handled = true, // Don't emit "/" for this case
-                    };
-                }
-                return UriComponentIterator{
-                    .rest = self.rest[1..], // Skip leading '/'
-                    .position = 0,
-                    .done = false,
-                    .is_absolute_path = true,
-                    .initial_slash_handled = false, // Will emit "/" as first component
-                };
-            }
-            // Relative path - no leading slash to handle
-            return UriComponentIterator{
-                .rest = self.rest,
-                .position = 0,
-                .done = false,
-                .is_absolute_path = false,
-                .initial_slash_handled = true, // No slash to emit
-            };
-        }
-
-        // URI with scheme - just iterate over rest
+        // Simply iterate over the rest regardless of scheme or path type
         return UriComponentIterator{
             .rest = self.rest,
             .position = 0,
             .done = false,
-            .is_absolute_path = false,
-            .initial_slash_handled = true, // No initial slash for scheme URIs
         };
     }
 };
@@ -68,25 +32,10 @@ const UriComponentIterator = struct {
     rest: []const u8,
     position: usize,
     done: bool,
-    is_absolute_path: bool,
-    initial_slash_handled: bool,
 
     fn next(self: *UriComponentIterator) ?[]const u8 {
         if (self.done) {
             return null;
-        }
-
-        // Handle leading slash for absolute paths
-        if (self.is_absolute_path and !self.initial_slash_handled) {
-            self.initial_slash_handled = true;
-            // Emit "/" as the first component for absolute paths
-            return "/";
-        }
-
-        // Special case for single "/"
-        if (std.mem.eql(u8, self.rest, "./") and !self.initial_slash_handled) {
-            self.done = true;
-            return "./";
         }
 
         if (self.position >= self.rest.len) {
@@ -419,7 +368,7 @@ test "split_uri_single_slash" {
     try std.testing.expect(result.scheme == null);
 
     var iter = result.iterator();
-    try std.testing.expectEqualStrings("./", iter.next().?);
+    try std.testing.expectEqualStrings("/", iter.next().?);
     try std.testing.expect(iter.next() == null);
 }
 
