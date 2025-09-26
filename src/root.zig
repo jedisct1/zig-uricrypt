@@ -4,6 +4,7 @@ const sha3 = crypto.hash.sha3;
 const base64 = std.base64;
 
 const siv_size: usize = 16;
+const PADBS: usize = 3; // Padding block size for base64 compatibility
 
 const UriComponents = struct {
     scheme: ?[]const u8,
@@ -127,7 +128,7 @@ pub fn encryptUri(
         const part_bytes = part;
 
         const total_unpadded = siv_size + part_bytes.len;
-        const padding = (3 - (total_unpadded % 3)) % 3;
+        const padding = (PADBS - (total_unpadded % PADBS)) % PADBS;
 
         components_hasher.update(part_bytes);
 
@@ -280,7 +281,7 @@ pub fn decryptUri(
             if (decrypted_byte == '/' or decrypted_byte == '?' or decrypted_byte == '#') {
                 const bytes_read = pos - component_start;
                 const total_len = siv_size + bytes_read;
-                const padding_needed = (3 - (total_len % 3)) % 3;
+                const padding_needed = (PADBS - (total_len % PADBS)) % PADBS;
                 pos += padding_needed;
                 keystream_pos += padding_needed;
                 break;
