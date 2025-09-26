@@ -160,6 +160,9 @@ pub fn encryptUri(
 
     if (components.scheme) |scheme| {
         try result.appendSlice(allocator, scheme);
+    } else {
+        // When scheme is absent, add a / prefix before the ciphertext
+        try result.append(allocator, '/');
     }
 
     // Encode to base64
@@ -188,9 +191,12 @@ pub fn decryptUri(
         if (encrypted_part.len == 0) {
             return allocator.dupe(u8, scheme.?);
         }
+    } else if (encrypted_uri.len > 0 and encrypted_uri[0] == '/') {
+        // Path-only URI with / prefix - skip the prefix
+        encrypted_part = encrypted_uri[1..];
     } else {
-        // No scheme found - treat as path-only URI
-        encrypted_part = encrypted_uri;
+        // Invalid format - path-only URIs must have / prefix
+        return error.DecryptionFailed;
     }
 
     const decoder = &base64.url_safe_no_pad.Decoder;
@@ -577,6 +583,8 @@ test "path_only_encryption" {
 
     // Should not contain a scheme separator
     try std.testing.expect(std.mem.indexOf(u8, encrypted1, "://") == null);
+    // Should have / prefix for path-only URIs
+    try std.testing.expect(encrypted1[0] == '/');
 
     // Should decrypt correctly
     const decrypted1 = try decryptUri(allocator, encrypted1, secret_key, context);
@@ -590,13 +598,15 @@ test "path_only_encryption" {
 
     // Should not contain a scheme separator
     try std.testing.expect(std.mem.indexOf(u8, encrypted2, "://") == null);
+    // Should have / prefix for path-only URIs
+    try std.testing.expect(encrypted2[0] == '/');
 
     const decrypted2 = try decryptUri(allocator, encrypted2, secret_key, context);
     defer allocator.free(decrypted2);
     try std.testing.expectEqualStrings(path2, decrypted2);
 }
 
-test "path_only_uris_no_prefix" {
+test "path_only_uris_with_prefix" {
     const allocator = std.testing.allocator;
 
     const secret_key = "test_key";
@@ -616,9 +626,8 @@ test "path_only_uris_no_prefix" {
         const encrypted = try encryptUri(allocator, uri, secret_key, context);
         defer allocator.free(encrypted);
 
-        // Path-only URIs should not have a '/' prefix in the ciphertext
-        // They should be pure base64
-        try std.testing.expect(encrypted[0] != '/');
+        // Path-only URIs should have a '/' prefix before the ciphertext
+        try std.testing.expect(encrypted[0] == '/');
 
         // Should not contain scheme separator
         try std.testing.expect(std.mem.indexOf(u8, encrypted, "://") == null);
